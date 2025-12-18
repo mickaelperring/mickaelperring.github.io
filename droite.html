@@ -206,13 +206,10 @@
             return { tx, ty };
         }
 
-        function updateDisplay() {
+        function updateDisplay(M_coords) {
             // Check snap
             if (Math.abs(M_params.ty) < SNAP_THRESHOLD) {
                 isSnapped = true;
-                // Visually snap the text, but maybe keep internal value?
-                // Requirement: "Si le point M est sur la ligne... highlight"
-                // Let's visual snap input logic too.
             } else {
                 isSnapped = false;
             }
@@ -221,7 +218,7 @@
             // If snapped, force display 0.0
             const dispTy = isSnapped ? "0.0" : M_params.ty.toFixed(1);
 
-            let html = `M = A + (<span style="color:#fbd000">${dispTx}</span>, <span style="color:${isSnapped ? '#00ff00' : '#fbd000'}">${dispTy}</span>) * u`;
+            let html = `M = A + (tx:<span style="color:#fbd000">${dispTx}</span>, ty:<span style="color:${isSnapped ? '#00ff00' : '#fbd000'}">${dispTy}</span>) * u`;
             if (isSnapped) {
                 html += '<br><span style="color:#00ff00; font-size:10px">ON THE LINE!</span>';
                 infoDisplay.style.borderColor = "#00ff00";
@@ -231,12 +228,34 @@
             infoDisplay.innerHTML = html;
         }
 
+        function drawStats(M) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(10, 10, 220, 100);
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(10, 10, 220, 100);
+
+            ctx.font = "12px 'Press Start 2P'";
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "left";
+
+            const coords = [
+                { label: "A", p: A, color: "#e52521" },
+                { label: "B", p: B, color: "#e52521" },
+                { label: "M", p: M, color: isSnapped ? "#00ff00" : "#fbd000" }
+            ];
+
+            coords.forEach((item, index) => {
+                ctx.fillStyle = item.color;
+                ctx.fillText(`${item.label} = (${Math.round(item.p.x)}, ${Math.round(item.p.y)})`, 20, 40 + index * 25);
+            });
+        }
+
         function draw() {
             // Background already handled by CSS, but let's clear
             ctx.clearRect(0, 0, width, height);
 
-            // Draw Line AB (Infinite visually?) No, "segment passing through A and B"
-            // Let's draw the full line across screen
+            // Draw Line AB
             ctx.save();
             ctx.beginPath();
             // Calculate far points
@@ -291,7 +310,8 @@
                 ctx.setLineDash([]);
             }
 
-            updateDisplay();
+            updateDisplay(M);
+            drawStats(M);
         }
 
         function drawPoint(p, label, color, isM = false) {
