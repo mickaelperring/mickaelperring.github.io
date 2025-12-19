@@ -171,54 +171,30 @@
         }
 
         function getPointFromParams(tx, ty) {
-            const u = getVector(A, B); // Vector u = AB
-            // Orthogonal vector v (rotated -90 deg for standard cartesian, but canvas y is inverted)
-            // Let's use standard right-hand rule visually.
-            // u = (ux, uy). v = (-uy, ux).
-            const v = { x: u.y, y: -u.x };
-
-            // However, to keep aspect ratio 1:1 visually:
-            // M = A + tx * u + ty * v
+            const u = getVector(A, B);
+            // User Formula: Mx = Ax + tx*(Bx - Ax), My = Ay + ty*(By - Ay)
             return {
-                x: A.x + M_params.tx * u.x + M_params.ty * v.x,
-                y: A.y + M_params.tx * u.y + M_params.ty * v.y
+                x: A.x + tx * u.x,
+                y: A.y + ty * u.y
             };
         }
 
         function getParamsFromPoint(x, y) {
             const u = getVector(A, B);
-            const v = { x: u.y, y: -u.x };
-            const AM = { x: x - A.x, y: y - A.y };
-
-            // Project AM onto u and v
-            // We want tx, ty such that AM = tx*u + ty*v
-            // This is a linear system:
-            // AM.x = tx*u.x + ty*v.x
-            // AM.y = tx*u.y + ty*v.y
-
-            // Determinant
-            const det = u.x * v.y - u.y * v.x;
-
-            // Cramer's rule
-            const tx = (AM.x * v.y - AM.y * v.x) / det;
-            const ty = (u.x * AM.y - u.y * AM.x) / det;
-
+            // Inverse: tx = (Mx - Ax) / ux, ty = (My - Ay) / uy
+            // Avoid division by zero
+            const tx = Math.abs(u.x) > 0.001 ? (x - A.x) / u.x : 0;
+            const ty = Math.abs(u.y) > 0.001 ? (y - A.y) / u.y : 0;
             return { tx, ty };
         }
 
         function updateDisplay(M_coords) {
-            // Check snap
-            if (Math.abs(M_params.ty) < SNAP_THRESHOLD) {
-                isSnapped = true;
-            } else {
-                isSnapped = false;
-            }
+            // Snap logic is handled in draw() or input handler
+            // Just display current values
+            const dispTx = M_params.tx.toFixed(2);
+            const dispTy = M_params.ty.toFixed(2);
 
-            const dispTx = M_params.tx.toFixed(1);
-            // If snapped, force display 0.0
-            const dispTy = isSnapped ? "0.0" : M_params.ty.toFixed(1);
-
-            let html = `M = A + (tx:<span style="color:#fbd000">${dispTx}</span>, ty:<span style="color:${isSnapped ? '#00ff00' : '#fbd000'}">${dispTy}</span>) * u`;
+            let html = `M = A + (tx:<span style="color:#00ffff">${dispTx}</span>, ty:<span style="color:#ff00ff">${dispTy}</span>) * u`;
             if (isSnapped) {
                 html += '<br><span style="color:#00ff00; font-size:10px">ON THE LINE!</span>';
                 infoDisplay.style.borderColor = "#00ff00";
@@ -275,52 +251,62 @@
             drawPoint(A, "A", "#e52521");
             drawPoint(B, "B", "#e52521");
 
-            // Calculate M screen position
-            // If snapped, visual position is on the line
-            let renderTx = M_params.tx;
-            let renderTy = M_params.ty;
+            const uVec = getVector(A, B);
 
-            if (Math.abs(renderTy) < SNAP_THRESHOLD) {
-                renderTy = 0;
+            // Snap Logic (Geometric distance to line)
+            // Project current M (from params) to line
+            let rawM = getPointFromParams(M_params.tx, M_params.ty);
+
+            // Distance from rawM to line AB
+            // Area of triangle = 0.5 * base * height
+            // height = 2 * Area / base
+            // Area = |(Bx-Ax)(Ay-My) - (Ax-Mx)(By-Ay)| / 2
+            const num = Math.abs(uVec.x * (A.y - rawM.y) - (A.x - rawM.x) * uVec.y);
+            const den = Math.sqrt(uVec.x**2 + uVec.y**2);
+            const dist = num / den;
+
+            isSnapped = dist < 20; // 20 pixels threshold
+
+            let M = rawM;
+            if (isSnapped) {
+                // Project M onto line
+                // P = A + t * u
+                // t = (AM . u) / (u . u)
+                const t = ((rawM.x - A.x) * uVec.x + (rawM.y - A.y) * uVec.y) / (uVec.x**2 + uVec.y**2);
+                M = {
+                    x: A.x + t * uVec.x,
+                    y: A.y + t * uVec.y
+                };
             }
 
-            const uVec = getVector(A, B);
-            const vVec = { x: uVec.y, y: -uVec.x };
-            const M = {
-                x: A.x + renderTx * uVec.x + renderTy * vVec.x,
-                y: A.y + renderTx * uVec.y + renderTy * vVec.y
-            };
+            const displayParams = getParamsFromPoint(M.x, M.y);
 
-            // Projection point P on line (for vector decomposition)
-            const P = {
-                    x: A.x + renderTx * uVec.x,
-                    y: A.y + renderTx * uVec.y
-            };
+            // Draw Vectors
+            // 1. Horizontal Component (A to H)
+            // H = (Mx, Ay)
+            const H = { x: M.x, y: A.y };
 
-            // Draw Vectors if not snapped (or even if snapped, tx is relevant)
             // Draw AM
             drawArrow(A, M, "#ffffff", 2);
 
-            if (!isSnapped) {
-                // Draw AP (tx component)
-                // Offset slightly to be visible over the main line?
-                // Or just draw clear colored arrow.
-                drawArrow(A, P, "#00ffff", 2);
-                drawLabel((A.x + P.x)/2, (A.y + P.y)/2, "tx", "#00ffff");
+            // Draw Component tx (A -> H) - this corresponds to tx * ux
+            drawArrow(A, H, "#00ffff", 2);
+            drawLabel((A.x + H.x)/2, A.y - 15, "tx", "#00ffff");
 
-                // Draw PM (ty component)
-                drawArrow(P, M, "#ff00ff", 2);
-                drawLabel((P.x + M.x)/2, (P.y + M.y)/2, "ty", "#ff00ff");
-            } else {
-                // Just draw tx component since ty is 0
-                drawArrow(A, M, "#00ffff", 2);
-                drawLabel((A.x + M.x)/2, (A.y + M.y)/2, "tx", "#00ffff");
-            }
+            // Draw Component ty (H -> M) - this corresponds to ty * uy
+            drawArrow(H, M, "#ff00ff", 2);
+            drawLabel(H.x + 10, (H.y + M.y)/2, "ty", "#ff00ff");
 
             // Draw M
             drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
 
+            // Override display with snapped values if snapped
+            const originalParams = M_params;
+            M_params = displayParams;
             updateDisplay(M);
+            M_params = originalParams;
+
+            drawStats(M);
             drawStats(M);
         }
 
@@ -382,14 +368,22 @@
 
         // Interaction
         function handleInput(x, y) {
-            const params = getParamsFromPoint(x, y);
+            // Check snap distance
+            const uVec = getVector(A, B);
+            const num = Math.abs(uVec.x * (A.y - y) - (A.x - x) * uVec.y);
+            const den = Math.sqrt(uVec.x**2 + uVec.y**2);
+            const dist = num / den;
+
+            let params = getParamsFromPoint(x, y);
+
+            if (dist < 20) {
+                // Snap to line implies tx = ty
+                // Find projection t
+                const t = ((x - A.x) * uVec.x + (y - A.y) * uVec.y) / (uVec.x**2 + uVec.y**2);
+                params = { tx: t, ty: t };
+            }
+
             M_params = params;
-
-            // Magnetic logic handled in draw/updateDisplay mostly visual,
-            // but let's apply a soft snap to the data if dragging
-            // Actually user said: "Si le point M est sur la ligne... highlight"
-            // And "saisir tx, ty avec +/-".
-
             draw();
         }
 
@@ -418,9 +412,9 @@
 
         function onPointerUp() {
             isDragging = false;
-            // If released while snapped, strictly set ty to 0
             if (isSnapped) {
-                M_params.ty = 0;
+                // If released while snapped, keep the snapped state
+                // The current M_params (calculated in handleInput) are already correct (tx=ty)
                 draw();
             }
         }
