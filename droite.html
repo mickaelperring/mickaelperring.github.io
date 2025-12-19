@@ -291,27 +291,72 @@
                 y: A.y + renderTx * uVec.y + renderTy * vVec.y
             };
 
+            // Projection point P on line (for vector decomposition)
+            const P = {
+                    x: A.x + renderTx * uVec.x,
+                    y: A.y + renderTx * uVec.y
+            };
+
+            // Draw Vectors if not snapped (or even if snapped, tx is relevant)
+            // Draw AM
+            drawArrow(A, M, "#ffffff", 2);
+
+            if (!isSnapped) {
+                // Draw AP (tx component)
+                // Offset slightly to be visible over the main line?
+                // Or just draw clear colored arrow.
+                drawArrow(A, P, "#00ffff", 2);
+                drawLabel((A.x + P.x)/2, (A.y + P.y)/2, "tx", "#00ffff");
+
+                // Draw PM (ty component)
+                drawArrow(P, M, "#ff00ff", 2);
+                drawLabel((P.x + M.x)/2, (P.y + M.y)/2, "ty", "#ff00ff");
+            } else {
+                // Just draw tx component since ty is 0
+                drawArrow(A, M, "#00ffff", 2);
+                drawLabel((A.x + M.x)/2, (A.y + M.y)/2, "tx", "#00ffff");
+            }
+
             // Draw M
             drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
 
-            // Draw vector connection if M is far
-            if (!isSnapped) {
-                ctx.setLineDash([5, 5]);
-                ctx.strokeStyle = "rgba(255,255,255,0.5)";
-                ctx.beginPath();
-                // Projection point P on line
-                const P = {
-                     x: A.x + renderTx * uVec.x,
-                     y: A.y + renderTx * uVec.y
-                };
-                ctx.moveTo(P.x, P.y);
-                ctx.lineTo(M.x, M.y);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
             updateDisplay(M);
             drawStats(M);
+        }
+
+        function drawArrow(from, to, color, width) {
+            const headlen = 10; // length of head in pixels
+            const angle = Math.atan2(to.y - from.y, to.x - from.x);
+
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = width;
+
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.stroke();
+
+            // Arrowhead
+            ctx.beginPath();
+            ctx.moveTo(to.x, to.y);
+            ctx.lineTo(to.x - headlen * Math.cos(angle - Math.PI / 6), to.y - headlen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(to.x - headlen * Math.cos(angle + Math.PI / 6), to.y - headlen * Math.sin(angle + Math.PI / 6));
+            ctx.lineTo(to.x, to.y);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawLabel(x, y, text, color) {
+            ctx.save();
+            ctx.font = "10px 'Press Start 2P'";
+            ctx.fillStyle = color;
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 2;
+            ctx.strokeText(text, x + 5, y - 5);
+            ctx.fillText(text, x + 5, y - 5);
+            ctx.restore();
         }
 
         function drawPoint(p, label, color, isM = false) {
