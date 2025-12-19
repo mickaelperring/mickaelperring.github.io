@@ -194,7 +194,9 @@
             const dispTx = M_params.tx.toFixed(2);
             const dispTy = M_params.ty.toFixed(2);
 
-            let html = `M = A + (tx:<span style="color:#00ffff">${dispTx}</span>, ty:<span style="color:#ff00ff">${dispTy}</span>) * u`;
+            let html = `Mx = Ax + <span style="color:#00ffff">${dispTx}</span> * (Bx - Ax)<br>`;
+            html += `My = Ay + <span style="color:#ff00ff">${dispTy}</span> * (By - Ay)`;
+
             if (isSnapped) {
                 html += '<br><span style="color:#00ff00; font-size:10px">ON THE LINE!</span>';
                 infoDisplay.style.borderColor = "#00ff00";
@@ -285,6 +287,11 @@
             // Draw AM
             drawArrow(A, M, "#ffffff", 2);
 
+            // Draw Projections
+            drawProjection(A, "A", "#e52521");
+            drawProjection(B, "B", "#e52521");
+            drawProjection(M, "M", isSnapped ? "#00ff00" : "#fbd000");
+
             // Draw M
             drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
 
@@ -296,6 +303,35 @@
 
             drawStats(M);
             drawStats(M);
+        }
+
+        function drawProjection(p, label, color) {
+            ctx.save();
+            ctx.setLineDash([2, 2]);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+
+            // Project to X axis (Top edge)
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x, 0);
+            ctx.stroke();
+
+            // Label X
+            ctx.fillStyle = color;
+            ctx.font = "10px 'Press Start 2P'";
+            ctx.fillText(label + "x", p.x - 10, 12);
+
+            // Project to Y axis (Left edge)
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(0, p.y);
+            ctx.stroke();
+
+            // Label Y
+            ctx.fillText(label + "y", 2, p.y - 5);
+
+            ctx.restore();
         }
 
         function drawArrow(from, to, color, width) {
