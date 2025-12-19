@@ -282,20 +282,8 @@
             const displayParams = getParamsFromPoint(M.x, M.y);
 
             // Draw Vectors
-            // 1. Horizontal Component (A to H)
-            // H = (Mx, Ay)
-            const H = { x: M.x, y: A.y };
-
             // Draw AM
             drawArrow(A, M, "#ffffff", 2);
-
-            // Draw Component tx (A -> H) - this corresponds to tx * ux
-            drawArrow(A, H, "#00ffff", 2);
-            drawLabel((A.x + H.x)/2, A.y - 15, "tx", "#00ffff");
-
-            // Draw Component ty (H -> M) - this corresponds to ty * uy
-            drawArrow(H, M, "#ff00ff", 2);
-            drawLabel(H.x + 10, (H.y + M.y)/2, "ty", "#ff00ff");
 
             // Draw M
             drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
