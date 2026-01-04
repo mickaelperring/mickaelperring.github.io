@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
@@ -172,57 +171,32 @@
         }
 
         function getPointFromParams(tx, ty) {
-            const u = getVector(A, B); // Vector u = AB
-            // Orthogonal vector v (rotated -90 deg for standard cartesian, but canvas y is inverted)
-            // Let's use standard right-hand rule visually.
-            // u = (ux, uy). v = (-uy, ux).
-            const v = { x: u.y, y: -u.x };
-
-            // However, to keep aspect ratio 1:1 visually:
-            // M = A + tx * u + ty * v
+            const u = getVector(A, B);
+            // User Formula: Mx = Ax + tx*(Bx - Ax), My = Ay + ty*(By - Ay)
             return {
-                x: A.x + M_params.tx * u.x + M_params.ty * v.x,
-                y: A.y + M_params.tx * u.y + M_params.ty * v.y
+                x: A.x + tx * u.x,
+                y: A.y + ty * u.y
             };
         }
 
         function getParamsFromPoint(x, y) {
             const u = getVector(A, B);
-            const v = { x: u.y, y: -u.x };
-            const AM = { x: x - A.x, y: y - A.y };
-
-            // Project AM onto u and v
-            // We want tx, ty such that AM = tx*u + ty*v
-            // This is a linear system:
-            // AM.x = tx*u.x + ty*v.x
-            // AM.y = tx*u.y + ty*v.y
-
-            // Determinant
-            const det = u.x * v.y - u.y * v.x;
-
-            // Cramer's rule
-            const tx = (AM.x * v.y - AM.y * v.x) / det;
-            const ty = (u.x * AM.y - u.y * AM.x) / det;
-
+            // Inverse: tx = (Mx - Ax) / ux, ty = (My - Ay) / uy
+            // Avoid division by zero
+            const tx = Math.abs(u.x) > 0.001 ? (x - A.x) / u.x : 0;
+            const ty = Math.abs(u.y) > 0.001 ? (y - A.y) / u.y : 0;
             return { tx, ty };
         }
 
-        function updateDisplay() {
-            // Check snap
-            if (Math.abs(M_params.ty) < SNAP_THRESHOLD) {
-                isSnapped = true;
-                // Visually snap the text, but maybe keep internal value?
-                // Requirement: "Si le point M est sur la ligne... highlight"
-                // Let's visual snap input logic too.
-            } else {
-                isSnapped = false;
-            }
+        function updateDisplay(M_coords) {
+            // Snap logic is handled in draw() or input handler
+            // Just display current values
+            const dispTx = M_params.tx.toFixed(2);
+            const dispTy = M_params.ty.toFixed(2);
 
-            const dispTx = M_params.tx.toFixed(1);
-            // If snapped, force display 0.0
-            const dispTy = isSnapped ? "0.0" : M_params.ty.toFixed(1);
+            let html = `Mx = Ax + <span style="color:#00ffff">${dispTx}</span> * (Bx - Ax)<br>`;
+            html += `My = Ay + <span style="color:#ff00ff">${dispTy}</span> * (By - Ay)`;
 
-            let html = `M = A + (<span style="color:#fbd000">${dispTx}</span>, <span style="color:${isSnapped ? '#00ff00' : '#fbd000'}">${dispTy}</span>) * u`;
             if (isSnapped) {
                 html += '<br><span style="color:#00ff00; font-size:10px">ON THE LINE!</span>';
                 infoDisplay.style.borderColor = "#00ff00";
@@ -232,12 +206,34 @@
             infoDisplay.innerHTML = html;
         }
 
+        function drawStats(M) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(10, 10, 220, 100);
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(10, 10, 220, 100);
+
+            ctx.font = "12px 'Press Start 2P'";
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "left";
+
+            const coords = [
+                { label: "A", p: A, color: "#e52521" },
+                { label: "B", p: B, color: "#e52521" },
+                { label: "M", p: M, color: isSnapped ? "#00ff00" : "#fbd000" }
+            ];
+
+            coords.forEach((item, index) => {
+                ctx.fillStyle = item.color;
+                ctx.fillText(`${item.label} = (${Math.round(item.p.x)}, ${Math.round(item.p.y)})`, 20, 40 + index * 25);
+            });
+        }
+
         function draw() {
             // Background already handled by CSS, but let's clear
             ctx.clearRect(0, 0, width, height);
 
-            // Draw Line AB (Infinite visually?) No, "segment passing through A and B"
-            // Let's draw the full line across screen
+            // Draw Line AB
             ctx.save();
             ctx.beginPath();
             // Calculate far points
@@ -257,42 +253,120 @@
             drawPoint(A, "A", "#e52521");
             drawPoint(B, "B", "#e52521");
 
-            // Calculate M screen position
-            // If snapped, visual position is on the line
-            let renderTx = M_params.tx;
-            let renderTy = M_params.ty;
+            const uVec = getVector(A, B);
 
-            if (Math.abs(renderTy) < SNAP_THRESHOLD) {
-                renderTy = 0;
+            // Snap Logic (Geometric distance to line)
+            // Project current M (from params) to line
+            let rawM = getPointFromParams(M_params.tx, M_params.ty);
+
+            // Distance from rawM to line AB
+            // Area of triangle = 0.5 * base * height
+            // height = 2 * Area / base
+            // Area = |(Bx-Ax)(Ay-My) - (Ax-Mx)(By-Ay)| / 2
+            const num = Math.abs(uVec.x * (A.y - rawM.y) - (A.x - rawM.x) * uVec.y);
+            const den = Math.sqrt(uVec.x**2 + uVec.y**2);
+            const dist = num / den;
+
+            isSnapped = dist < 20; // 20 pixels threshold
+
+            let M = rawM;
+            if (isSnapped) {
+                // Project M onto line
+                // P = A + t * u
+                // t = (AM . u) / (u . u)
+                const t = ((rawM.x - A.x) * uVec.x + (rawM.y - A.y) * uVec.y) / (uVec.x**2 + uVec.y**2);
+                M = {
+                    x: A.x + t * uVec.x,
+                    y: A.y + t * uVec.y
+                };
             }
 
-            const uVec = getVector(A, B);
-            const vVec = { x: uVec.y, y: -uVec.x };
-            const M = {
-                x: A.x + renderTx * uVec.x + renderTy * vVec.x,
-                y: A.y + renderTx * uVec.y + renderTy * vVec.y
-            };
+            const displayParams = getParamsFromPoint(M.x, M.y);
+
+            // Draw Vectors
+            // Draw AM
+            drawArrow(A, M, "#ffffff", 2);
+
+            // Draw Projections
+            drawProjection(A, "A", "#e52521");
+            drawProjection(B, "B", "#e52521");
+            drawProjection(M, "M", isSnapped ? "#00ff00" : "#fbd000");
 
             // Draw M
             drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
 
-            // Draw vector connection if M is far
-            if (!isSnapped) {
-                ctx.setLineDash([5, 5]);
-                ctx.strokeStyle = "rgba(255,255,255,0.5)";
-                ctx.beginPath();
-                // Projection point P on line
-                const P = {
-                     x: A.x + renderTx * uVec.x,
-                     y: A.y + renderTx * uVec.y
-                };
-                ctx.moveTo(P.x, P.y);
-                ctx.lineTo(M.x, M.y);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
+            // Override display with snapped values if snapped
+            const originalParams = M_params;
+            M_params = displayParams;
+            updateDisplay(M);
+            M_params = originalParams;
 
-            updateDisplay();
+            drawStats(M);
+            drawStats(M);
+        }
+
+        function drawProjection(p, label, color) {
+            ctx.save();
+            ctx.setLineDash([2, 2]);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+
+            // Project to X axis (Top edge)
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x, 0);
+            ctx.stroke();
+
+            // Label X
+            ctx.fillStyle = color;
+            ctx.font = "10px 'Press Start 2P'";
+            ctx.fillText(label + "x", p.x - 10, 12);
+
+            // Project to Y axis (Left edge)
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(0, p.y);
+            ctx.stroke();
+
+            // Label Y
+            ctx.fillText(label + "y", 2, p.y - 5);
+
+            ctx.restore();
+        }
+
+        function drawArrow(from, to, color, width) {
+            const headlen = 10; // length of head in pixels
+            const angle = Math.atan2(to.y - from.y, to.x - from.x);
+
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = width;
+
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.stroke();
+
+            // Arrowhead
+            ctx.beginPath();
+            ctx.moveTo(to.x, to.y);
+            ctx.lineTo(to.x - headlen * Math.cos(angle - Math.PI / 6), to.y - headlen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(to.x - headlen * Math.cos(angle + Math.PI / 6), to.y - headlen * Math.sin(angle + Math.PI / 6));
+            ctx.lineTo(to.x, to.y);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawLabel(x, y, text, color) {
+            ctx.save();
+            ctx.font = "10px 'Press Start 2P'";
+            ctx.fillStyle = color;
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 2;
+            ctx.strokeText(text, x + 5, y - 5);
+            ctx.fillText(text, x + 5, y - 5);
+            ctx.restore();
         }
 
         function drawPoint(p, label, color, isM = false) {
@@ -318,14 +392,22 @@
 
         // Interaction
         function handleInput(x, y) {
-            const params = getParamsFromPoint(x, y);
+            // Check snap distance
+            const uVec = getVector(A, B);
+            const num = Math.abs(uVec.x * (A.y - y) - (A.x - x) * uVec.y);
+            const den = Math.sqrt(uVec.x**2 + uVec.y**2);
+            const dist = num / den;
+
+            let params = getParamsFromPoint(x, y);
+
+            if (dist < 20) {
+                // Snap to line implies tx = ty
+                // Find projection t
+                const t = ((x - A.x) * uVec.x + (y - A.y) * uVec.y) / (uVec.x**2 + uVec.y**2);
+                params = { tx: t, ty: t };
+            }
+
             M_params = params;
-
-            // Magnetic logic handled in draw/updateDisplay mostly visual,
-            // but let's apply a soft snap to the data if dragging
-            // Actually user said: "Si le point M est sur la ligne... highlight"
-            // And "saisir tx, ty avec +/-".
-
             draw();
         }
 
@@ -354,9 +436,9 @@
 
         function onPointerUp() {
             isDragging = false;
-            // If released while snapped, strictly set ty to 0
             if (isSnapped) {
-                M_params.ty = 0;
+                // If released while snapped, keep the snapped state
+                // The current M_params (calculated in handleInput) are already correct (tx=ty)
                 draw();
             }
         }
