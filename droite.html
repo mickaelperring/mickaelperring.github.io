@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Droite Interactive Mario</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --mario-sky: #6b8cff;
+            --mario-ground: #c45c16;
+            --mario-brick: #b64b12;
+            --text-color: #ffffff;
+            --highlight: #fbd000; /* Coin yellow */
+            --snap-color: #00ff00; /* Green shell */
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--mario-sky);
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden; /* Prevent scrolling */
+            touch-action: none; /* Prevent standard touch actions */
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            color: var(--text-color);
+        }
+
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            background-image:
+                linear-gradient(transparent 95%, rgba(255,255,255,0.2) 95%),
+                linear-gradient(90deg, transparent 95%, rgba(255,255,255,0.2) 95%);
+            background-size: 20px 20px;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #controls {
+            flex-shrink: 0;
+            background-color: var(--mario-ground);
+            border-top: 4px solid #000;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: inset 0 4px 0 rgba(255,255,255,0.2);
+        }
+
+        #info-display {
+            background-color: #000;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 12px;
+            border: 2px solid #fff;
+            line-height: 1.5;
+        }
+
+        .inputs-row {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mario-btn {
+            background-color: #e52521;
+            border: 2px solid #000;
+            color: white;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 20px;
+            width: 48px;
+            height: 48px;
+            cursor: pointer;
+            box-shadow: 2px 2px 0 #8b1614;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .mario-btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: none;
+        }
+
+        .label-text {
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        /* Snapped state styling */
+        .snapped-text {
+            color: var(--snap-color) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="graphCanvas"></canvas>
+    </div>
+
+    <div id="controls">
+        <div id="info-display">M = A + (0.0, 0.0) * u</div>
+
+        <div class="inputs-row">
+            <div class="control-group">
+                <span class="label-text">tx</span>
+                <button class="mario-btn" id="tx-minus">-</button>
+                <button class="mario-btn" id="tx-plus">+</button>
+            </div>
+
+            <div class="control-group">
+                <span class="label-text">ty</span>
+                <button class="mario-btn" id="ty-minus">-</button>
+                <button class="mario-btn" id="ty-plus">+</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('graphCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoDisplay = document.getElementById('info-display');
+
+        // State
+        let width, height;
+
+        // Points (in screen coordinates)
+        let A = { x: 0, y: 0 };
+        let B = { x: 0, y: 0 };
+
+        // M state (in terms of tx, ty)
+        let M_params = { tx: 0.5, ty: 0.5 };
+
+        const SNAP_THRESHOLD = 0.15;
+        let isSnapped = false;
+
+        // Initialization
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            width = canvas.width;
+            height = canvas.height;
+
+            // Set A and B fixed positions (20% and 80% width, vertically centered with some offset)
+            A = { x: width * 0.2, y: height * 0.6 };
+            B = { x: width * 0.8, y: height * 0.4 };
+
+            draw();
+        }
+
+        window.addEventListener('resize', resize);
+
+        // Math Helpers
+        function getVector(p1, p2) {
+            return { x: p2.x - p1.x, y: p2.y - p1.y };
+        }
+
+        function getPointFromParams(tx, ty) {
+            const u = getVector(A, B); // Vector u = AB
+            // Orthogonal vector v (rotated -90 deg for standard cartesian, but canvas y is inverted)
+            // Let's use standard right-hand rule visually.
+            // u = (ux, uy). v = (-uy, ux).
+            const v = { x: u.y, y: -u.x };
+
+            // However, to keep aspect ratio 1:1 visually:
+            // M = A + tx * u + ty * v
+            return {
+                x: A.x + M_params.tx * u.x + M_params.ty * v.x,
+                y: A.y + M_params.tx * u.y + M_params.ty * v.y
+            };
+        }
+
+        function getParamsFromPoint(x, y) {
+            const u = getVector(A, B);
+            const v = { x: u.y, y: -u.x };
+            const AM = { x: x - A.x, y: y - A.y };
+
+            // Project AM onto u and v
+            // We want tx, ty such that AM = tx*u + ty*v
+            // This is a linear system:
+            // AM.x = tx*u.x + ty*v.x
+            // AM.y = tx*u.y + ty*v.y
+
+            // Determinant
+            const det = u.x * v.y - u.y * v.x;
+
+            // Cramer's rule
+            const tx = (AM.x * v.y - AM.y * v.x) / det;
+            const ty = (u.x * AM.y - u.y * AM.x) / det;
+
+            return { tx, ty };
+        }
+
+        function updateDisplay() {
+            // Check snap
+            if (Math.abs(M_params.ty) < SNAP_THRESHOLD) {
+                isSnapped = true;
+                // Visually snap the text, but maybe keep internal value?
+                // Requirement: "Si le point M est sur la ligne... highlight"
+                // Let's visual snap input logic too.
+            } else {
+                isSnapped = false;
+            }
+
+            const dispTx = M_params.tx.toFixed(1);
+            // If snapped, force display 0.0
+            const dispTy = isSnapped ? "0.0" : M_params.ty.toFixed(1);
+
+            let html = `M = A + (<span style="color:#fbd000">${dispTx}</span>, <span style="color:${isSnapped ? '#00ff00' : '#fbd000'}">${dispTy}</span>) * u`;
+            if (isSnapped) {
+                html += '<br><span style="color:#00ff00; font-size:10px">ON THE LINE!</span>';
+                infoDisplay.style.borderColor = "#00ff00";
+            } else {
+                infoDisplay.style.borderColor = "#fff";
+            }
+            infoDisplay.innerHTML = html;
+        }
+
+        function draw() {
+            // Background already handled by CSS, but let's clear
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Line AB (Infinite visually?) No, "segment passing through A and B"
+            // Let's draw the full line across screen
+            ctx.save();
+            ctx.beginPath();
+            // Calculate far points
+            const u = getVector(A, B);
+            const slope = u.y / u.x;
+            // Draw a long line
+            ctx.strokeStyle = isSnapped ? "#00ff00" : "#ffffff";
+            ctx.lineWidth = isSnapped ? 6 : 4;
+
+            // Draw segment AB
+            ctx.moveTo(A.x - u.x * 10, A.y - u.y * 10);
+            ctx.lineTo(B.x + u.x * 10, B.y + u.y * 10);
+            ctx.stroke();
+            ctx.restore();
+
+            // Draw A and B
+            drawPoint(A, "A", "#e52521");
+            drawPoint(B, "B", "#e52521");
+
+            // Calculate M screen position
+            // If snapped, visual position is on the line
+            let renderTx = M_params.tx;
+            let renderTy = M_params.ty;
+
+            if (Math.abs(renderTy) < SNAP_THRESHOLD) {
+                renderTy = 0;
+            }
+
+            const uVec = getVector(A, B);
+            const vVec = { x: uVec.y, y: -uVec.x };
+            const M = {
+                x: A.x + renderTx * uVec.x + renderTy * vVec.x,
+                y: A.y + renderTx * uVec.y + renderTy * vVec.y
+            };
+
+            // Draw M
+            drawPoint(M, "M", isSnapped ? "#00ff00" : "#fbd000", true);
+
+            // Draw vector connection if M is far
+            if (!isSnapped) {
+                ctx.setLineDash([5, 5]);
+                ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                ctx.beginPath();
+                // Projection point P on line
+                const P = {
+                     x: A.x + renderTx * uVec.x,
+                     y: A.y + renderTx * uVec.y
+                };
+                ctx.moveTo(P.x, P.y);
+                ctx.lineTo(M.x, M.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            updateDisplay();
+        }
+
+        function drawPoint(p, label, color, isM = false) {
+            ctx.fillStyle = color;
+            const size = isM ? 12 : 8;
+
+            // Pixel art point (square)
+            ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
+
+            // Outline
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(p.x - size/2, p.y - size/2, size, size);
+
+            // Label
+            ctx.font = "16px 'Press Start 2P'";
+            ctx.fillStyle = "#fff";
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 3;
+            ctx.strokeText(label, p.x + 15, p.y - 15);
+            ctx.fillText(label, p.x + 15, p.y - 15);
+        }
+
+        // Interaction
+        function handleInput(x, y) {
+            const params = getParamsFromPoint(x, y);
+            M_params = params;
+
+            // Magnetic logic handled in draw/updateDisplay mostly visual,
+            // but let's apply a soft snap to the data if dragging
+            // Actually user said: "Si le point M est sur la ligne... highlight"
+            // And "saisir tx, ty avec +/-".
+
+            draw();
+        }
+
+        // Pointer Events (Mouse + Touch)
+        let isDragging = false;
+
+        function onPointerDown(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+
+            // Check if clicking near M (optional, or allow clicking anywhere to move M)
+            // Let's allow clicking anywhere to teleport M, it's easier for mobile
+            isDragging = true;
+            handleInput(x, y);
+        }
+
+        function onPointerMove(e) {
+            if (!isDragging) return;
+            e.preventDefault(); // Prevent scrolling
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+            handleInput(x, y);
+        }
+
+        function onPointerUp() {
+            isDragging = false;
+            // If released while snapped, strictly set ty to 0
+            if (isSnapped) {
+                M_params.ty = 0;
+                draw();
+            }
+        }
+
+        canvas.addEventListener('mousedown', onPointerDown);
+        canvas.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('mouseup', onPointerUp);
+
+        canvas.addEventListener('touchstart', onPointerDown, {passive: false});
+        canvas.addEventListener('touchmove', onPointerMove, {passive: false});
+        window.addEventListener('touchend', onPointerUp);
+
+        // Buttons
+        function adjust(param, delta) {
+            M_params[param] += delta;
+            // Round to avoid float errors
+            M_params[param] = Math.round(M_params[param] * 10) / 10;
+            draw();
+        }
+
+        document.getElementById('tx-minus').addEventListener('click', () => adjust('tx', -0.1));
+        document.getElementById('tx-plus').addEventListener('click', () => adjust('tx', 0.1));
+        document.getElementById('ty-minus').addEventListener('click', () => adjust('ty', -0.1));
+        document.getElementById('ty-plus').addEventListener('click', () => adjust('ty', 0.1));
+
+        // Start
+        setTimeout(resize, 100); // Small delay to ensure layout is ready
+    </script>
+</body>
+</html>
